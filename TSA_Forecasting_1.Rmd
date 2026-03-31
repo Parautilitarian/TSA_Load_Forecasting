@@ -20,12 +20,16 @@ library(readxl)
 library(forecast)
 ```
 
+## Preprocessing
 
-## Read Dataset and calculate daily load
+#### Load Data
+
 ```{r}
 load <- read_excel("load.xlsx")
 head(load)
 ```
+
+#### Convert Hourly to Daily
 
 ```{r}
 daily_load <- load %>%
@@ -38,7 +42,8 @@ daily_load$date <- as.Date(daily_load$date)
 
 ```
 
-# 1. Baseline Model: TBATS 
+#### Train-Validation Split
+
 ```{r}
 train_data <- daily_load %>%
   filter(date <= as.Date("2010-06-30"))
@@ -59,6 +64,12 @@ valid_ts <- msts(
   start = c(2010, 182)
 )
 
+head(train_ts)
+```
+
+# Baseline Model: TBATS
+
+```{r}
 fit_tbats <- tbats(train_ts)
 forecast_tbats <- forecast(fit_tbats, h = length(valid_ts))
 
@@ -67,6 +78,3 @@ autoplot(forecast_tbats) +
   xlim(2010, 2010.6) +
   ylab("electricity load")
 ```
-
-
-
