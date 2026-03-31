@@ -1,0 +1,72 @@
+---
+title: "TSA Forecasting_1"
+output: html_document
+date: "2026-03-30"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(lubridate)
+library(ggplot2)
+library(forecast)  
+library(Kendall)
+library(tseries)
+library(outliers)
+library(tidyverse)
+library(readxl)
+library(forecast)
+```
+
+
+## Read Dataset and calculate daily load
+```{r}
+load <- read_excel("load.xlsx")
+head(load)
+```
+
+```{r}
+daily_load <- load %>%
+  rowwise() %>%
+  mutate(daily_load = mean(c_across(starts_with("h")), na.rm = TRUE)) %>%
+  ungroup() %>%
+  select(date, daily_load)
+
+daily_load$date <- as.Date(daily_load$date)
+
+```
+
+# 1. Baseline Model: TBATS 
+```{r}
+train_data <- daily_load %>%
+  filter(date <= as.Date("2010-06-30"))
+
+valid_data <- daily_load %>%
+  filter(date >= as.Date("2010-07-01") &
+         date <= as.Date("2010-07-31"))
+
+train_ts <- msts(
+  train_data$daily_load,
+  seasonal.periods = c(7, 365),
+  start = c(2005, 1)
+)
+
+valid_ts <- msts(
+  valid_data$daily_load,
+  seasonal.periods = c(7, 365),
+  start = c(2010, 182)
+)
+
+fit_tbats <- tbats(train_ts)
+forecast_tbats <- forecast(fit_tbats, h = length(valid_ts))
+
+autoplot(forecast_tbats) +
+  autolayer(valid_ts, series = "Actual", PI = FALSE) +
+  xlim(2010, 2010.6) +
+  ylab("electricity load")
+```
+
+
+
