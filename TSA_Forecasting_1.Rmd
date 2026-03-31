@@ -78,3 +78,31 @@ autoplot(forecast_tbats) +
   xlim(2010, 2010.6) +
   ylab("electricity load")
 ```
+
+# Export
+
+#### Export Function
+
+```{r}
+export_submission <- function(forecast_obj, filename) {
+  
+  # extract forecast values
+  fc_values <- as.numeric(forecast_obj$mean)
+  
+  # create July 2011 dates
+  dates <- seq(as.Date("2011-07-01"), as.Date("2011-07-31"), by = "day")
+  
+  # keep only first 31 forecast values
+  df <- data.frame(
+    date = dates,
+    load = fc_values[1:length(dates)]
+  )
+  
+  # write csv
+  write.csv(df, filename, row.names = FALSE)
+}
+```
+
+```{r}
+export_submission(forecast_tbats, "tbats_submission.csv")
+```
