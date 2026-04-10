@@ -63,8 +63,6 @@ valid_ts <- msts(
   seasonal.periods = c(7, 365),
   start = c(2010, 182)
 )
-
-head(train_ts)
 ```
 
 # Baseline Model: TBATS
@@ -78,6 +76,119 @@ autoplot(forecast_tbats) +
   xlim(2010, 2010.6) +
   ylab("electricity load")
 ```
+
+# Temperature Dataset
+
+#### Preprocessing
+
+```{r}
+# load data
+temperature <- read_excel("temperature.xlsx")
+head(temperature)
+```
+
+```{r}
+# convert hourly to daily
+temp_daily <- temperature %>%
+  mutate(date = as.Date(date, format="%d%b%Y")) %>%
+  group_by(date) %>%
+  summarise(across(-hr, mean, na.rm = TRUE))
+
+# split train data
+temp_train <- temp_daily %>%
+  filter(date <= as.Date("2010-06-30"))
+
+# convert to time series
+temp_train_ts <- ts(
+  temp_train[,-1],
+  start = c(2005,1),
+  frequency = 365
+)
+```
+
+#### Determining each station's level of correlations with load
+
+```{r}
+cors <- cor(train_ts, temp_train_ts, use="complete.obs")
+sort(cors, decreasing = TRUE)
+```
+
+-   **All correlations are around -0.41 to -0.47. That means:**
+
+    -   **Temperature and load are moderately negatively correlated.**
+
+    -   **The stations behave very similarly (only \~0.05 difference between best and worst).**
+
+```{r}
+# average all station data since their correlations are similar
+temp_avg_ts <- ts(
+  rowMeans(temp_train_ts, na.rm = TRUE),
+  start = start(temp_train_ts),
+  frequency = frequency(temp_train_ts)
+)
+```
+
+```{r}
+ccf(train_ts, temp_avg_ts, lag.max = 7)
+```
+
+**Investigating correlations between average temperature and a lagged load series showed no** **improvement in correlations.**
+
+# Humidity Dataset
+
+#### Preprocessing
+
+```{r}
+# load data
+humidity <- read_excel("relative_humidity.xlsx")
+head(humidity)
+```
+
+```{r}
+# convert hourly to daily
+humi_daily <- humidity %>%
+  mutate(date = as.Date(date, format="%d%b%Y")) %>%
+  group_by(date) %>%
+  summarise(across(-hr, mean, na.rm = TRUE))
+
+# split train data
+humi_train <- humi_daily %>%
+  filter(date <= as.Date("2010-06-30"))
+
+# convert to time series
+humi_train_ts <- ts(
+  humi_train[,-1],
+  start = c(2005,1),
+  frequency = 365
+)
+```
+
+#### Determining each station's level of correlations with load
+
+```{r}
+cors_humi <- cor(train_ts, humi_train_ts, use="complete.obs")
+sort(cors_humi, decreasing = TRUE)
+```
+
+**Relative humidity have an even weaker negative correlations with load than the temperature measurements.**
+
+**I'll average the top 5 stations with a correlation of 0.225 and larger in absolute value.**
+
+```{r}
+top5 <- order(abs(cors), decreasing = TRUE)[1:5]
+
+humi_avg_ts <- ts(
+  rowMeans(humi_train_ts[, top5], na.rm = TRUE),
+  start = start(humi_train_ts),
+  frequency = frequency(humi_train_ts)
+)
+```
+
+```{r}
+ccf(train_ts, humi_avg_ts, lag.max = 7)
+```
+
+**Investigating correlations between average temperature and a lagged load series showed no** **improvement in correlations.**
 
 # Export
 
