@@ -20,9 +20,9 @@ library(readxl)
 library(forecast)
 ```
 
-## Preprocessing
+## 1. Load Dataset
 
-#### Load Data
+#### Preprocessing
 
 ```{r}
 load <- read_excel("load.xlsx")
@@ -52,23 +52,31 @@ valid_data <- daily_load %>%
   filter(date >= as.Date("2010-07-01") &
          date <= as.Date("2010-07-31"))
 
-train_ts <- msts(
+train_msts <- msts(
   train_data$daily_load,
   seasonal.periods = c(7, 365),
   start = c(2005, 1)
 )
 
-valid_ts <- msts(
+train_ts <- ts(train_data$daily_load,
+               start = c(2005,1),
+               frequency = 365)
+
+valid_msts <- msts(
   valid_data$daily_load,
   seasonal.periods = c(7, 365),
   start = c(2010, 182)
 )
+
+valid_ts <- ts(valid_data$daily_load,
+               start = c(2010,7),
+               frequency = 365)
 ```
 
-# Baseline Model: TBATS
+## 2. TBATS (Baseline Model)
 
 ```{r}
-fit_tbats <- tbats(train_ts)
+fit_tbats <- tbats(train_msts)
 forecast_tbats <- forecast(fit_tbats, h = length(valid_ts))
 
 autoplot(forecast_tbats) +
@@ -77,7 +85,7 @@ autoplot(forecast_tbats) +
   ylab("electricity load")
 ```
 
-# Temperature Dataset
+## 3. Temperature Dataset
 
 #### Preprocessing
 
@@ -134,7 +142,7 @@ ccf(train_ts, temp_avg_ts, lag.max = 7)
 
 **Investigating correlations between average temperature and a lagged load series showed no** **improvement in correlations.**
 
-# Humidity Dataset
+## 4. Humidity Dataset
 
 #### Preprocessing
 
@@ -190,7 +198,28 @@ ccf(train_ts, humi_avg_ts, lag.max = 7)
 
 **Investigating correlations between average temperature and a lagged load series showed no** **improvement in correlations.**
 
-# Export
+## 5. SARIMAX Model
+
+```{r}
+xreg <- cbind(temp_avg_ts, humi_avg_ts)
+
+fit_arimax <- auto.arima(
+  train_ts,
+  xreg = xreg,
+  seasonal = TRUE
+)
+```
+
+```{r}
+fc_arimax <- forecast(fit_arimax, xreg = xreg, h = length(valid_ts))
+
+autoplot(fc_arimax) +
+  autolayer(valid_ts, series = "Actual", PI = FALSE) +
+  xlim(2010, 2010.6) +
+  ylab("electricity load")
+```
+
+## 10. Export
 
 #### Export Function
 
@@ -214,6 +243,14 @@ export_submission <- function(forecast_obj, filename) {
 }
 ```
 
+#### TBATS baseline model
+
 ```{r}
 export_submission(forecast_tbats, "tbats_submission.csv")
+```
+
+#### SARIMAX model
+
+```{r}
+export_submission(fc_arimax, "SARIMAX_submission.csv")
 ```
