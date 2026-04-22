@@ -73,14 +73,21 @@ valid_ts <- ts(valid_data$daily_load,
                frequency = 365)
 ```
 
+#### Decomposition
+
+```{r}
+decomp <- stl(train_ts, s.window = "periodic")
+autoplot(decomp) # seasonal
+```
+
 ## 2. TBATS (Baseline Model)
 
 ```{r}
 fit_tbats <- tbats(train_msts)
-forecast_tbats <- forecast(fit_tbats, h = length(valid_ts))
+forecast_tbats <- forecast(fit_tbats, h = length(valid_msts))
 
 autoplot(forecast_tbats) +
-  autolayer(valid_ts, series = "Actual", PI = FALSE) +
+  autolayer(valid_msts, series = "Actual", PI = FALSE) +
   xlim(2010, 2010.6) +
   ylab("electricity load")
 ```
@@ -198,13 +205,13 @@ ccf(train_ts, humi_avg_ts, lag.max = 7)
 
 **Investigating correlations between average temperature and a lagged load series showed no** **improvement in correlations.**
 
-## 5. SARIMAX Model
+## 5. SARIMAX Model with Temperature and Humidity
 
 ```{r}
 xreg <- cbind(temp_avg_ts, humi_avg_ts)
 
 fit_arimax <- auto.arima(
-  train_ts,
+  train_msts,
   xreg = xreg,
   seasonal = TRUE
 )
@@ -214,12 +221,142 @@ fit_arimax <- auto.arima(
 fc_arimax <- forecast(fit_arimax, xreg = xreg, h = length(valid_ts))
 
 autoplot(fc_arimax) +
+  autolayer(valid_msts, series = "Actual", PI = FALSE) +
+  xlim(2010, 2010.6) +
+  ylab("electricity load")
+```
+
+## 6. ARIMA + Fourier Terms
+
+```{r}
+best_aicc <- Inf
+best_fit <- NULL
+best_K <- NULL
+
+for(k1 in 1:3){        # weekly (max 3)
+  for(k2 in 1:10){     # yearly (safe range)
+    
+    xreg <- fourier(train_msts, K = c(k1, k2))
+    
+    fit <- auto.arima(
+      train_msts,
+      xreg = xreg,
+      seasonal = FALSE
+    )
+    
+    if(fit$aicc < best_aicc){
+      best_aicc <- fit$aicc
+      best_fit <- fit
+      best_K <- c(k1, k2)
+    }
+  }
+}
+
+best_K
+```
+
+```{r}
+K <- c(3, 1)   # 3 Fourier pairs for weekly, 5 for yearly
+
+fourier_train <- fourier(train_msts, K = K)
+
+fit_arima_fourier <- auto.arima(
+  train_msts,
+  xreg = fourier_train,
+  seasonal = FALSE
+)
+
+fourier_future <- fourier(train_msts, K = K, h = length(valid_msts))
+
+forecast_arima_fourier <- forecast(
+  fit_arima_fourier,
+  xreg = fourier_future,
+  h = length(valid_msts)
+)
+
+autoplot(forecast_arima_fourier) +
+  autolayer(valid_msts, series = "Actual", PI = FALSE) +
+  xlim(2010, 2010.6) +
+  ylab("electricity load")
+```
+
+## 7. NNETAR
+
+```{r}
+fit_nnetar <- nnetar(train_msts)
+
+forecast_nnetar <- forecast(
+  fit_nnetar,
+  h = length(valid_msts)
+)
+
+autoplot(forecast_nnetar) +
+  autolayer(valid_msts, series = "Actual", PI = FALSE) +
+  xlim(2010, 2010.6) +
+  ylab("electricity load")
+```
+
+## 8. MSTL + ETS
+
+```{r}
+fit_mstl <- mstl(train_msts)
+
+fit_ets <- ets(seasadj(fit_mstl))
+
+fc_mstl <- forecast(fit_ets, h = length(valid_msts))
+
+autoplot(fc_mstl) +
+  autolayer(valid_msts, series = "Actual", PI = FALSE) +
+  xlim(2010, 2010.6) +
+  ylab("electricity load")
+```
+
+## 9. STLM
+
+```{r}
+fit_stlm <- stlm(train_msts, method = "ets")
+
+fc_stlm <- forecast(fit_stlm, h = length(valid_msts))
+
+autoplot(fc_stlm) +
+  autolayer(valid_msts, series = "Actual", PI = FALSE) +
+  xlim(2010, 2010.6) +
+  ylab("electricity load")
+```
+
+## 10. Prophet
+
+```{r}
+library(prophet)
+
+train_df <- data.frame(
+  ds = train_data$date,
+  y = train_data$daily_load
+)
+
+fit_prophet <- prophet(train_df)
+
+future <- make_future_dataframe(fit_prophet,
+                                periods = length(valid_msts),
+                                freq = "day")
+
+fc_prophet <- predict(fit_prophet, future)
+
+plot(fit_prophet, fc_prophet)
+```
+
+## 11. Theta
+
+```{r}
+fit_theta <- thetaf(train_ts, h = length(valid_ts))
+
+autoplot(fit_theta) +
   autolayer(valid_ts, series = "Actual", PI = FALSE) +
   xlim(2010, 2010.6) +
   ylab("electricity load")
 ```
 
-## 10. Export
+## Export
 
 #### Export Function
 
@@ -253,4 +390,40 @@ export_submission(forecast_tbats, "tbats_submission.csv")
 
 ```{r}
 export_submission(fc_arimax, "SARIMAX_submission.csv")
+```
+
+#### Fourier Terms
+
+```{r}
+export_submission(forecast_arima_fourier,"ARIMA_Fourier.csv")
+```
+
+#### NNETAR
+
+```{r}
+export_submission(forecast_nnetar,"NNETAR.csv")
+```
+
+#### MSTL
+
+```{r}
+export_submission(fc_mstl,"MSTL_ETS.csv")
+```
+
+#### STLM
+
+```{r}
+export_submission(fc_stlm,"STLM.csv")
+```
+
+#### Prophet
+
+```{r}
+export_submission(fc_prophet,"Prophet.csv")
+```
+
+#### Theta
+
+```{r}
+export_submission(fit_theta,"Theta.csv")
 ```
