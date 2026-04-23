@@ -1,0 +1,422 @@
+---
+title: "TSA Forecasting_report_top5"
+output: html_document
+date: "2026-04-23"
+---
+
+> Summary of results: The TBATS model achieved the best performance due to its ability to capture multiple seasonal patterns in daily electricity demand. Other models incorporating exogenous variables did not significantly improve accuracy.
+Model performace rank from best to worst: 
+1. TBATS
+2. SARIMAX
+3. STLM
+4. MSTL_ETS
+5. ARIMA + Fourier
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(lubridate)
+library(ggplot2)
+library(forecast)  
+library(Kendall)
+library(tseries)
+library(outliers)
+library(tidyverse)
+library(readxl)
+library(forecast)
+```
+
+## 1. Load Dataset
+
+#### Preprocessing
+
+```{r}
+load <- read_excel("load.xlsx")
+head(load)
+```
+
+#### Convert Hourly to Daily
+
+```{r}
+daily_load <- load %>%
+  rowwise() %>%
+  mutate(daily_load = mean(c_across(starts_with("h")), na.rm = TRUE)) %>%
+  ungroup() %>%
+  select(date, daily_load)
+
+daily_load$date <- as.Date(daily_load$date)
+
+```
+
+#### Train-Validation Split
+
+```{r}
+train_data <- daily_load %>%
+  filter(date <= as.Date("2010-06-30"))
+
+valid_data <- daily_load %>%
+  filter(date >= as.Date("2010-07-01") &
+         date <= as.Date("2010-07-31"))
+
+train_msts <- msts(
+  train_data$daily_load,
+  seasonal.periods = c(7, 365),
+  start = c(2005, 1)
+)
+
+train_ts <- ts(train_data$daily_load,
+               start = c(2005,1),
+               frequency = 365)
+
+valid_msts <- msts(
+  valid_data$daily_load,
+  seasonal.periods = c(7, 365),
+  start = c(2010, 182)
+)
+
+valid_ts <- ts(valid_data$daily_load,
+               start = c(2010,7),
+               frequency = 365)
+```
+
+#### Decomposition
+
+```{r}
+decomp <- stl(train_ts, s.window = "periodic")
+autoplot(decomp) # seasonal
+```
+
+## 2. Model 1 - TBATS (Baseline Model)
+
+```{r}
+fit_tbats <- tbats(train_msts)
+forecast_tbats <- forecast(fit_tbats, h = length(valid_msts))
+
+autoplot(forecast_tbats) +
+  autolayer(valid_msts, series = "Actual", PI = FALSE) +
+  xlim(2010, 2010.6) +
+  ylab("electricity load")
+```
+
+```{r}
+summary(fit_tbats)
+accuracy(forecast_tbats, valid_msts)
+```
+
+## 3. Temperature Dataset
+
+#### Preprocessing
+
+```{r}
+# load data
+temperature <- read_excel("temperature.xlsx")
+head(temperature)
+```
+
+```{r}
+# convert hourly to daily
+temp_daily <- temperature %>%
+  mutate(date = as.Date(date, format="%d%b%Y")) %>%
+  group_by(date) %>%
+  summarise(across(-hr, mean, na.rm = TRUE))
+
+# split train data
+temp_train <- temp_daily %>%
+  filter(date <= as.Date("2010-06-30"))
+
+# convert to time series
+temp_train_ts <- ts(
+  temp_train[,-1],
+  start = c(2005,1),
+  frequency = 365
+)
+```
+
+#### Determining each station's level of correlations with load
+
+```{r}
+cors <- cor(train_ts, temp_train_ts, use="complete.obs")
+sort(cors, decreasing = TRUE)
+```
+
+-   **All correlations are around -0.41 to -0.47. That means:**
+
+    -   **Temperature and load are moderately negatively correlated.**
+
+    -   **The stations behave very similarly (only \~0.05 difference between best and worst).**
+
+```{r}
+# average all station data since their correlations are similar
+temp_avg_ts <- ts(
+  rowMeans(temp_train_ts, na.rm = TRUE),
+  start = start(temp_train_ts),
+  frequency = frequency(temp_train_ts)
+)
+```
+
+```{r}
+ccf(train_ts, temp_avg_ts, lag.max = 7)
+```
+
+**Investigating correlations between average temperature and a lagged load series showed no** **improvement in correlations.**
+
+## 4. Humidity Dataset
+
+#### Preprocessing
+
+```{r}
+# load data
+humidity <- read_excel("relative_humidity.xlsx")
+head(humidity)
+```
+
+```{r}
+# convert hourly to daily
+humi_daily <- humidity %>%
+  mutate(date = as.Date(date, format="%d%b%Y")) %>%
+  group_by(date) %>%
+  summarise(across(-hr, mean, na.rm = TRUE))
+
+# split train data
+humi_train <- humi_daily %>%
+  filter(date <= as.Date("2010-06-30"))
+
+# convert to time series
+humi_train_ts <- ts(
+  humi_train[,-1],
+  start = c(2005,1),
+  frequency = 365
+)
+```
+
+#### Determining each station's level of correlations with load
+
+```{r}
+cors_humi <- cor(train_ts, humi_train_ts, use="complete.obs")
+sort(cors_humi, decreasing = TRUE)
+```
+
+**Relative humidity have an even weaker negative correlations with load than the temperature measurements.**
+
+**I'll average the top 5 stations with a correlation of 0.225 and larger in absolute value.**
+
+```{r}
+top5 <- order(abs(cors), decreasing = TRUE)[1:5]
+
+humi_avg_ts <- ts(
+  rowMeans(humi_train_ts[, top5], na.rm = TRUE),
+  start = start(humi_train_ts),
+  frequency = frequency(humi_train_ts)
+)
+```
+
+```{r}
+ccf(train_ts, humi_avg_ts, lag.max = 7)
+```
+
+**Investigating correlations between average temperature and a lagged load series showed no** **improvement in correlations.**
+
+## 5. Model 2 - SARIMAX Model with Temperature and Humidity
+
+```{r}
+ts_train <- ts(
+  train_data$daily_load,
+  start = c(2005, 1),
+  frequency = 365
+)
+
+valid_ts <- ts(
+  valid_data$daily_load,
+  start = c(2010, 182),
+  frequency = 365
+)
+
+xreg_train <- cbind(
+  temp = train_data$temp,
+  humi = train_data$humidity
+)
+
+xreg_valid <- cbind(
+  temp = valid_data$temp,
+  humi = valid_data$humidity
+)
+
+fit_sarimax <- auto.arima(
+  ts_train,
+  xreg = xreg_train,
+  seasonal = TRUE
+)
+```
+
+```{r}
+fc_sarimax <- forecast(
+  fit_sarimax,
+  xreg = xreg_valid,
+  h = nrow(valid_data)
+)
+
+autoplot(fc_sarimax) +
+  autolayer(valid_ts, series = "Actual") +
+  ylab("electricity load")
+```
+```{r}
+summary(fit_sarimax)
+accuracy(fc_sarimax, valid_ts)
+```
+
+## 6. Model 3 - ARIMA + Fourier Terms
+
+```{r}
+best_aicc <- Inf
+best_fit <- NULL
+best_K <- NULL
+
+for(k1 in 1:3){        # weekly (max 3)
+  for(k2 in 1:10){     # yearly (safe range)
+    
+    xreg <- fourier(train_msts, K = c(k1, k2))
+    
+    fit <- auto.arima(
+      train_msts,
+      xreg = xreg,
+      seasonal = FALSE
+    )
+    
+    if(fit$aicc < best_aicc){
+      best_aicc <- fit$aicc
+      best_fit <- fit
+      best_K <- c(k1, k2)
+    }
+  }
+}
+
+best_K
+```
+
+```{r}
+K <- c(3,1)
+# 3 Fourier pairs for weekly, 5 for yearly
+
+fourier_train <- fourier(train_msts, K = K)
+
+fit_arima_fourier <- auto.arima(
+  train_msts,
+  xreg = fourier_train,
+  seasonal = FALSE
+)
+
+fourier_future <- fourier(train_msts, K = K, h = length(valid_msts))
+
+forecast_arima_fourier <- forecast(
+  fit_arima_fourier,
+  xreg = fourier_future,
+  h = length(valid_msts)
+)
+
+autoplot(forecast_arima_fourier) +
+  autolayer(valid_msts, series = "Actual", PI = FALSE) +
+  xlim(2010, 2010.6) +
+  ylab("electricity load")
+```
+
+```{r}
+summary(fit_arima_fourier)
+accuracy(forecast_arima_fourier, valid_msts)
+```
+
+## 8. Model 4 - MSTL + ETS
+
+```{r}
+fit_mstl <- mstl(train_msts)
+
+fit_ets <- ets(seasadj(fit_mstl))
+
+fc_mstl <- forecast(fit_ets, h = length(valid_msts))
+
+autoplot(fc_mstl) +
+  autolayer(valid_msts, series = "Actual", PI = FALSE) +
+  xlim(2010, 2010.6) +
+  ylab("electricity load")
+```
+
+```{r}
+summary(fit_ets)
+accuracy(fc_mstl, valid_msts)
+```
+
+## 9. Model 5 - STLM
+
+```{r}
+fit_stlm <- stlm(train_msts, method = "ets")
+
+fc_stlm <- forecast(fit_stlm, h = length(valid_msts))
+
+autoplot(fc_stlm) +
+  autolayer(valid_msts, series = "Actual", PI = FALSE) +
+  xlim(2010, 2010.6) +
+  ylab("electricity load")
+```
+```{r}
+summary(fit_stlm)
+accuracy(fc_stlm, valid_msts)
+```
+> Model performaces interpretation: 
+Among the five models evaluated, The baseline TBATS model consistently achieved the lowest RMSE, MAE, and MAPE on the test set, indicating best predictive accuracy.
+In contrast, The other 4 exhibited higher forecast errors, with the ARIMA + Fourier model performing the worst across all metrics.
+Notably, the Theil’s U statistic for Model 1 is closest to 1, suggesting that its performance is competitive relative to a naïve benchmark, while other models significantly underperform.
+
+## Export
+
+#### Export Function
+
+```{r}
+export_submission <- function(forecast_obj, filename) {
+  
+  # extract forecast values
+  fc_values <- as.numeric(forecast_obj$mean)
+  
+  # create July 2011 dates
+  dates <- seq(as.Date("2011-07-01"), as.Date("2011-07-31"), by = "day")
+  
+  # keep only first 31 forecast values
+  df <- data.frame(
+    date = dates,
+    load = fc_values[1:length(dates)]
+  )
+  
+  # write csv
+  write.csv(df, filename, row.names = FALSE)
+}
+```
+
+#### TBATS baseline model
+
+```{r}
+export_submission(forecast_tbats, "tbats_submission.csv")
+```
+
+#### SARIMAX model
+
+```{r}
+export_submission(fc_arimax, "SARIMAX_submission.csv")
+```
+
+#### Fourier Terms
+
+```{r}
+export_submission(forecast_arima_fourier,"ARIMA_Fourier.csv")
+```
+
+#### MSTL
+
+```{r}
+export_submission(fc_mstl,"MSTL_ETS.csv")
+```
+
+#### STLM
+
+```{r}
+export_submission(fc_stlm,"STLM.csv")
+```
