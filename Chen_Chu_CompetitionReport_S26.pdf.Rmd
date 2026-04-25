@@ -2,21 +2,36 @@
 title: "TSA Forecasting_report_top5"
 output: html_document
 date: "2026-04-23"
+author: Bruce Chen, Jeffery Chu
+editor_options: 
+  markdown: 
+    wrap: 72
 ---
 
-> Summary of results: The TBATS model achieved the best performance due to its ability to capture multiple seasonal patterns in daily electricity demand. Other models incorporating exogenous variables did not significantly improve accuracy.
-Model performace rank from best to worst: 
-1. TBATS
-2. SARIMAX
-3. STLM
-4. MSTL_ETS
-5. ARIMA + Fourier
+> Summary of results: The TBATS model achieved the best performance due
+> to its ability to capture multiple seasonal patterns in daily
+> electricity demand. Other models incorporating exogenous variables did
+> not significantly improve accuracy. Model performance rank from best
+> to worst:
+>
+> 1.  TBATS
+>
+> 2.  SARIMAX
+>
+> 3.  STLM
+>
+> 4.  MSTL_ETS
+>
+> 5.  ARIMA + Fourier
+>
+> Github links:
+> <https://github.com/Parautilitarian/TSA_Load_Forecasting>
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r}
+```{r, warning=FALSE}
 library(lubridate)
 library(ggplot2)
 library(forecast)  
@@ -145,7 +160,8 @@ sort(cors, decreasing = TRUE)
 
     -   **Temperature and load are moderately negatively correlated.**
 
-    -   **The stations behave very similarly (only \~0.05 difference between best and worst).**
+    -   **The stations behave very similarly (only \~0.05 difference
+        between best and worst).**
 
 ```{r}
 # average all station data since their correlations are similar
@@ -160,7 +176,8 @@ temp_avg_ts <- ts(
 ccf(train_ts, temp_avg_ts, lag.max = 7)
 ```
 
-**Investigating correlations between average temperature and a lagged load series showed no** **improvement in correlations.**
+**Investigating correlations between average temperature and a lagged
+load series showed no** **improvement in correlations.**
 
 ## 4. Humidity Dataset
 
@@ -198,9 +215,11 @@ cors_humi <- cor(train_ts, humi_train_ts, use="complete.obs")
 sort(cors_humi, decreasing = TRUE)
 ```
 
-**Relative humidity have an even weaker negative correlations with load than the temperature measurements.**
+**Relative humidity have an even weaker negative correlations with load
+than the temperature measurements.**
 
-**I'll average the top 5 stations with a correlation of 0.225 and larger in absolute value.**
+**I'll average the top 5 stations with a correlation of 0.225 and larger
+in absolute value.**
 
 ```{r}
 top5 <- order(abs(cors), decreasing = TRUE)[1:5]
@@ -216,7 +235,8 @@ humi_avg_ts <- ts(
 ccf(train_ts, humi_avg_ts, lag.max = 7)
 ```
 
-**Investigating correlations between average temperature and a lagged load series showed no** **improvement in correlations.**
+**Investigating correlations between average temperature and a lagged
+load series showed no** **improvement in correlations.**
 
 ## 5. Model 2 - SARIMAX Model with Temperature and Humidity
 
@@ -261,12 +281,13 @@ autoplot(fc_sarimax) +
   autolayer(valid_ts, series = "Actual") +
   ylab("electricity load")
 ```
+
 ```{r}
 summary(fit_sarimax)
 accuracy(fc_sarimax, valid_ts)
 ```
 
-## 6. Model 3 - ARIMA + Fourier Terms
+## 6. Model 3 - ARIMA + (Tuned) Fourier Terms
 
 ```{r}
 best_aicc <- Inf
@@ -358,14 +379,20 @@ autoplot(fc_stlm) +
   xlim(2010, 2010.6) +
   ylab("electricity load")
 ```
+
 ```{r}
 summary(fit_stlm)
 accuracy(fc_stlm, valid_msts)
 ```
-> Model performaces interpretation: 
-Among the five models evaluated, The baseline TBATS model consistently achieved the lowest RMSE, MAE, and MAPE on the test set, indicating best predictive accuracy.
-In contrast, The other 4 exhibited higher forecast errors, with the ARIMA + Fourier model performing the worst across all metrics.
-Notably, the Theil’s U statistic for Model 1 is closest to 1, suggesting that its performance is competitive relative to a naïve benchmark, while other models significantly underperform.
+
+> Model performance interpretation: Among the five models evaluated, The
+> baseline TBATS model consistently achieved the lowest RMSE, MAE, and
+> MAPE on the test set, indicating best predictive accuracy. In
+> contrast, The other 4 exhibited higher forecast errors, with the
+> ARIMA + Fourier model performing the worst across all metrics.
+> Notably, the Theil’s U statistic for Model 1 is closest to 1,
+> suggesting that its performance is competitive relative to a naïve
+> benchmark, while other models significantly unperformed.
 
 ## Export
 
@@ -400,7 +427,7 @@ export_submission(forecast_tbats, "tbats_submission.csv")
 #### SARIMAX model
 
 ```{r}
-export_submission(fc_arimax, "SARIMAX_submission.csv")
+export_submission(fc_sarimax, "SARIMAX_submission.csv")
 ```
 
 #### Fourier Terms
